@@ -1,28 +1,19 @@
-// ============================================================================
-// ПРОФЕССИОНАЛЬНЫЙ АНАЛИЗАТОР КЛАСТЕРИЗАЦИИ K-MEANS
-// Приложение для Windows с графическим интерфейсом
-// Реализует алгоритм K-means++ с детальной статистикой
-// ============================================================================
+#include <windows.h>
+#include <commctrl.h>
+#include <commdlg.h>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <cmath>
+#include <random>
+#include <algorithm>
+#include <limits>
+#include <iomanip>
+#include <chrono>
 
-// === ПОДКЛЮЧЕНИЕ БИБЛИОТЕК ===
-#include <windows.h>        // Основные функции Windows API
-#include <commctrl.h>       // Элементы управления (ListView, TabControl, ProgressBar)
-#include <commdlg.h>        // Диалоги открытия/сохранения файлов
-#include <vector>           // Динамические массивы
-#include <string>           // Работа со строками
-#include <fstream>          // Файловый ввод/вывод
-#include <sstream>          // Строковые потоки для парсинга
-#include <cmath>            // Математические функции (sqrt, pow)
-#include <random>           // Генератор случайных чисел для K-means++
-#include <algorithm>        // Алгоритмы (min, max, remove_if)
-#include <limits>           // Числовые лимиты (max double value)
-#include <iomanip>          // Форматирование вывода (setprecision)
-#include <chrono>           // Измерение времени выполнения
-
-// Подключение библиотеки элементов управления
 #pragma comment(lib, "comctl32.lib")
 
-// Отключение макросов min/max из windows.h для избежания конфликтов с std::min/max
 #ifdef max
 #undef max
 #endif
@@ -30,360 +21,283 @@
 #undef min
 #endif
 
-// === ИДЕНТИФИКАТОРЫ ЭЛЕМЕНТОВ ИНТЕРФЕЙСА ===
-#define ID_LOAD_BUTTON 1001        // Кнопка загрузки файла
-#define ID_CALC_BUTTON 1002        // Кнопка запуска кластеризации
-#define ID_K_INPUT 1003            // Поле ввода количества кластеров
-#define ID_THRESHOLD_INPUT 1004    // Поле ввода порога сходимости
-#define ID_MAX_ITER_INPUT 1005     // Поле ввода максимального числа итераций
-#define ID_EXPORT_BUTTON 1007      // Кнопка экспорта результатов
-#define ID_CLEAR_BUTTON 1008       // Кнопка очистки данных
-#define ID_RESULTS_LIST 1009       // Таблица общих результатов
-#define ID_CLUSTERS_LIST 1010      // Таблица информации о кластерах
-#define ID_POINTS_LIST 1011        // Таблица точек данных
-#define ID_STATS_LIST 1012         // Таблица статистики
+#define ID_LOAD_BUTTON 1001
+#define ID_CALC_BUTTON 1002
+#define ID_K_INPUT 1003
+#define ID_THRESHOLD_INPUT 1004
+#define ID_MAX_ITER_INPUT 1005
+#define ID_EXPORT_BUTTON 1007
+#define ID_CLEAR_BUTTON 1008
+#define ID_RESULTS_LIST 1009
+#define ID_CLUSTERS_LIST 1010
+#define ID_POINTS_LIST 1011
+#define ID_STATS_LIST 1012
 
-// === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ПРИЛОЖЕНИЯ ===
-HINSTANCE hInst;                                    // Дескриптор экземпляра приложения
-WCHAR szTitle[] = L"Анализатор кластеризации K-means - Профессиональная версия";  // Заголовок окна
-WCHAR szWindowClass[] = L"KmeansAnalyzerClass";     // Имя класса окна
-OPENFILENAME ofn;                                   // Структура для диалогов файлов
-wchar_t szFile[MAX_PATH] = L"";                     // Путь к загружаемому файлу
-wchar_t szSaveFile[MAX_PATH] = L"";                 // Путь к файлу для сохранения
+// Глобальные переменные
+HINSTANCE hInst;
+WCHAR szTitle[] = L"Анализатор кластеризации K-means - Профессиональная версия";
+WCHAR szWindowClass[] = L"KmeansAnalyzerClass";
+OPENFILENAME ofn;
+wchar_t szFile[MAX_PATH] = L"";
+wchar_t szSaveFile[MAX_PATH] = L"";
 
-// === ШРИФТЫ ДЛЯ РАЗЛИЧНЫХ ЭЛЕМЕНТОВ ИНТЕРФЕЙСА ===
-HFONT hFontTitle,      // Крупный жирный шрифт для заголовков
-      hFontButton,     // Обычный шрифт для кнопок
-      hFontText,       // Стандартный шрифт для текста
-      hFontBold,       // Жирный шрифт для выделения
-      hFontRange;      // Полужирный шрифт для диапазонов значений
+// Шрифты - ДОБАВЛЕН hFontRange
+HFONT hFontTitle, hFontButton, hFontText, hFontBold, hFontRange;
 
-// === СТРУКТУРЫ ДАННЫХ ===
-
-// Структура для представления точки в многомерном пространстве
+// Структуры данных
 struct Point {
-    std::vector<double> coords;    // Координаты точки (может быть любая размерность)
-    int clusterLabel = -1;         // Номер кластера, к которому принадлежит точка (-1 = не назначен)
-    int originalIndex = 0;         // Исходный индекс точки в загруженных данных
+    std::vector<double> coords;
+    int clusterLabel = -1;
+    int originalIndex = 0;
 };
 
-// Структура для хранения информации о кластере
 struct ClusterInfo {
-    std::vector<double> centroid;  // Координаты центроида кластера
-    int pointCount = 0;            // Количество точек в кластере
-    double avgDistance = 0.0;      // Среднее расстояние от точек до центроида
-    double minDistance = std::numeric_limits<double>::max();  // Минимальное расстояние
-    double maxDistance = 0.0;      // Максимальное расстояние
-    double variance = 0.0;         // Дисперсия расстояний внутри кластера
-    double compactness = 0.0;      // Коэффициент компактности кластера (0-1)
+    std::vector<double> centroid;
+    int pointCount = 0;
+    double avgDistance = 0.0;
+    double minDistance = std::numeric_limits<double>::max();
+    double maxDistance = 0.0;
+    double variance = 0.0;
+    double compactness = 0.0;
 };
 
-// === ДАННЫЕ АЛГОРИТМА ===
-std::vector<Point> points;              // Все загруженные точки данных
-std::vector<ClusterInfo> clusters;      // Информация о всех кластерах
-int k = 3;                              // Количество кластеров (по умолчанию 3)
-int maxIterations = 100;                // Максимальное количество итераций
-double convergenceThreshold = 0.01;     // Порог сходимости алгоритма
-int currentIteration = 0;               // Текущая итерация алгоритма
-bool isConverged = false;               // Флаг достижения сходимости
-double totalSSE = 0.0;                  // Общая сумма квадратов ошибок (Sum of Squared Errors)
-std::mt19937 rng(std::random_device{}()); // Генератор случайных чисел для K-means++
-std::chrono::steady_clock::time_point startTime; // Время начала выполнения алгоритма
+// Данные
+std::vector<Point> points;
+std::vector<ClusterInfo> clusters;
+int k = 3;
+int maxIterations = 100;
+double convergenceThreshold = 0.01;
+int currentIteration = 0;
+bool isConverged = false;
+double totalSSE = 0.0;
+std::mt19937 rng(std::random_device{}());
+std::chrono::steady_clock::time_point startTime;
 
-// === ДЕСКРИПТОРЫ ЭЛЕМЕНТОВ ИНТЕРФЕЙСА ===
-// Кнопки управления
-HWND hLoadBtn,      // Кнопка загрузки файла
-     hCalcBtn,      // Кнопка запуска кластеризации
-     hExportBtn,    // Кнопка экспорта результатов
-     hClearBtn;     // Кнопка очистки данных
+// UI элементы - ДОБАВЛЕНЫ переменные для диапазонов
+HWND hLoadBtn, hCalcBtn, hExportBtn, hClearBtn;
+HWND hKInput, hThresholdInput, hMaxIterInput;
+HWND hResultsList, hClustersList, hPointsList, hStatsList;
+HWND hStatusText, hProgressBar;
+HWND hTabControl;
+HWND hKRangeLabel, hThresholdRange, hIterRange;
 
-// Поля ввода параметров
-HWND hKInput,           // Поле ввода количества кластеров
-     hThresholdInput,   // Поле ввода порога сходимости
-     hMaxIterInput;     // Поле ввода максимального числа итераций
+// Функции
+LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+void InitializeResources();
+void CleanupResources();
+void CreateInterface(HWND hWnd);
+void ResizeInterface(HWND hWnd, int width, int height);
+HWND CreateListView(HWND parent, int x, int y, int w, int h, int id);
+void AddListColumn(HWND hList, LPCWSTR text, int width, int index);
+void AddListItem(HWND hList, int item, int subitem, LPCWSTR text);
+void ClearList(HWND hList);
+void CreateTabControl(HWND hWnd);
+void ShowTabContent(int tabIndex);
+void UpdateKRangeLabel();
+void AutoResizeColumns(HWND hListView); // ДОБАВЛЕНА новая функция
 
-// Таблицы для отображения результатов
-HWND hResultsList,   // Таблица общих результатов
-     hClustersList,  // Таблица информации о кластерах
-     hPointsList,    // Таблица точек данных
-     hStatsList;     // Таблица детальной статистики
+// Отображение данных
+void ShowWelcomeScreen();
+void ShowDataLoadedInfo();
+void ShowClusteringResults();
+void UpdateStatus(const std::wstring& message);
+void PopulateResultsTable();
+void PopulateClustersTable();
+void PopulatePointsTable();
+void PopulateStatsTable();
 
-// Элементы статуса и прогресса
-HWND hStatusText,    // Текстовое поле для отображения статуса
-     hProgressBar;   // Индикатор прогресса выполнения
+// K-means алгоритм
+void LoadDataFile();
+void RunClusteringAnalysis();
+void InitializeCentroidsKMeansPlusPlus();
+double CalculateEuclideanDistance(const std::vector<double>& a, const std::vector<double>& b);
+void AssignPointsToClusters();
+void UpdateClusterCentroids();
+void CalculateDetailedStatistics();
+bool ExportDetailedResults();
+void ClearAllData();
 
-// Элементы интерфейса
-HWND hTabControl;    // Контрол вкладок для организации результатов
-
-// Подписи диапазонов значений
-HWND hKRangeLabel,      // Подпись диапазона для количества кластеров
-     hThresholdRange,   // Подпись диапазона для порога сходимости
-     hIterRange;        // Подпись диапазона для количества итераций
-
-// === ОБЪЯВЛЕНИЯ ФУНКЦИЙ ===
-
-// Основные функции Windows
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);  // Обработчик сообщений окна
-
-// Управление ресурсами
-void InitializeResources();    // Инициализация шрифтов и ресурсов
-void CleanupResources();       // Освобождение ресурсов при завершении
-
-// Создание и управление интерфейсом
-void CreateInterface(HWND hWnd);                           // Создание всех элементов интерфейса
-void ResizeInterface(HWND hWnd, int width, int height);    // Изменение размеров при ресайзе окна
-HWND CreateListView(HWND parent, int x, int y, int w, int h, int id);  // Создание таблицы ListView
-void AddListColumn(HWND hList, LPCWSTR text, int width, int index);    // Добавление колонки в таблицу
-void AddListItem(HWND hList, int item, int subitem, LPCWSTR text);     // Добавление элемента в таблицу
-void ClearList(HWND hList);                                            // Очистка таблицы
-void CreateTabControl(HWND hWnd);                                      // Создание системы вкладок
-void ShowTabContent(int tabIndex);                                     // Переключение между вкладками
-void UpdateKRangeLabel();                                              // Обновление подписи диапазона K
-
-// Функции отображения данных
-void ShowWelcomeScreen();       // Показ приветственного экрана
-void ShowDataLoadedInfo();      // Показ информации о загруженных данных
-void ShowClusteringResults();   // Показ результатов кластеризации
-void UpdateStatus(const std::wstring& message);  // Обновление строки статуса
-
-// Заполнение таблиц данными
-void PopulateResultsTable();   // Заполнение таблицы общих результатов
-void PopulateClustersTable();  // Заполнение таблицы информации о кластерах
-void PopulatePointsTable();    // Заполнение таблицы точек данных
-void PopulateStatsTable();     // Заполнение таблицы статистики
-
-// Основные функции алгоритма K-means
-void LoadDataFile();                    // Загрузка данных из CSV файла
-void RunClusteringAnalysis();           // Запуск полного процесса кластеризации
-void InitializeCentroidsKMeansPlusPlus(); // Инициализация центроидов методом K-means++
-double CalculateEuclideanDistance(const std::vector<double>& a, const std::vector<double>& b); // Расчет евклидова расстояния
-void AssignPointsToClusters();          // Назначение точек к ближайшим кластерам
-void UpdateClusterCentroids();          // Обновление позиций центроидов
-void CalculateDetailedStatistics();     // Расчет детальной статистики кластеризации
-bool ExportDetailedResults();           // Экспорт результатов в файл
-void ClearAllData();                    // Очистка всех данных и сброс состояния
-
-// ============================================================================
-// ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
-// ============================================================================
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
 {
-    hInst = hInstance;  // Сохраняем дескриптор экземпляра приложения
+    hInst = hInstance;
 
-    // Инициализация расширенных элементов управления Windows
+    // Инициализация Common Controls
     INITCOMMONCONTROLSEX icex;
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
-    // Включаем поддержку ListView, ProgressBar и TabControl
     icex.dwICC = ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS | ICC_TAB_CLASSES;
     InitCommonControlsEx(&icex);
 
-    // Регистрация класса окна
     WNDCLASSEXW wcex = { sizeof(WNDCLASSEX) };
-    wcex.style = CS_HREDRAW | CS_VREDRAW;        // Перерисовка при изменении размеров
-    wcex.lpfnWndProc = WndProc;                  // Функция обработки сообщений
-    wcex.hInstance = hInst;                      // Дескриптор экземпляра
-    wcex.hIcon = LoadIcon(nullptr, IDI_APPLICATION);     // Стандартная иконка
-    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);       // Стандартный курсор
-    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);     // Цвет фона окна
-    wcex.lpszClassName = szWindowClass;          // Имя класса окна
+    wcex.style = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc = WndProc;
+    wcex.hInstance = hInst;
+    wcex.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcex.lpszClassName = szWindowClass;
 
-    RegisterClassExW(&wcex);  // Регистрируем класс в системе
+    RegisterClassExW(&wcex);
 
-    // Создание главного окна приложения
     HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, 0,    // Позиция окна (автоматически)
-        1600, 1000,          // Размер окна (ширина x высота)
-        nullptr, nullptr, hInst, nullptr);
+        CW_USEDEFAULT, 0, 1600, 1000, nullptr, nullptr, hInst, nullptr);
 
-    if (!hWnd) return FALSE;  // Проверка успешности создания окна
+    if (!hWnd) return FALSE;
 
-    // Инициализация ресурсов и создание интерфейса
-    InitializeResources();    // Создаем шрифты
-    CreateInterface(hWnd);    // Создаем все элементы интерфейса
-    ShowWelcomeScreen();      // Показываем приветственный экран
+    InitializeResources();
+    CreateInterface(hWnd);
+    ShowWelcomeScreen();
 
-    // Отображение окна
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
-    // Главный цикл обработки сообщений
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0))
     {
-        TranslateMessage(&msg);  // Преобразование сообщений клавиатуры
-        DispatchMessage(&msg);   // Отправка сообщения в оконную процедуру
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
 
-    CleanupResources();  // Освобождение ресурсов перед завершением
+    CleanupResources();
     return (int)msg.wParam;
 }
 
-// ============================================================================
-// УПРАВЛЕНИЕ РЕСУРСАМИ
-// ============================================================================
-
-// Инициализация всех шрифтов, используемых в приложении
 void InitializeResources()
 {
-    // Крупный жирный шрифт для главного заголовка (24pt)
     hFontTitle = CreateFontW(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-    // Обычный шрифт для кнопок (14pt)
     hFontButton = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-    // Стандартный шрифт для текста (13pt)
     hFontText = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-    // Жирный шрифт для выделения важной информации (14pt)
     hFontBold = CreateFontW(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-    // Полужирный шрифт для подписей диапазонов значений (14pt)
+    // ДОБАВЛЕН новый шрифт для диапазонов - жирный и увеличенный
     hFontRange = CreateFontW(14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 }
 
-// Освобождение всех созданных шрифтов
 void CleanupResources()
 {
-    DeleteObject(hFontTitle);   // Удаляем шрифт заголовка
-    DeleteObject(hFontButton);  // Удаляем шрифт кнопок
-    DeleteObject(hFontText);    // Удаляем обычный шрифт
-    DeleteObject(hFontBold);    // Удаляем жирный шрифт
-    DeleteObject(hFontRange);   // Удаляем шрифт диапазонов
+    DeleteObject(hFontTitle);
+    DeleteObject(hFontButton);
+    DeleteObject(hFontText);
+    DeleteObject(hFontBold);
+    DeleteObject(hFontRange); // ДОБАВЛЕНО удаление нового шрифта
 }
 
-// ============================================================================
-// СОЗДАНИЕ ПОЛЬЗОВАТЕЛЬСКОГО ИНТЕРФЕЙСА
-// ============================================================================
-
-// Создание всех элементов интерфейса в главном окне
 void CreateInterface(HWND hWnd)
 {
-    // === ГЛАВНЫЙ ЗАГОЛОВОК ПРИЛОЖЕНИЯ ===
+    // Заголовок
     CreateWindowW(L"STATIC", L"🔬 ПРОФЕССИОНАЛЬНЫЙ АНАЛИЗАТОР КЛАСТЕРИЗАЦИИ K-MEANS",
-        WS_VISIBLE | WS_CHILD | SS_CENTER,  // Видимый, дочерний, центрированный
-        20, 20, 1540, 40,                   // Позиция и размер
-        hWnd, nullptr, hInst, nullptr);
+        WS_VISIBLE | WS_CHILD | SS_CENTER,
+        20, 20, 1540, 40, hWnd, nullptr, hInst, nullptr);
 
     // === ЛЕВАЯ ПАНЕЛЬ УПРАВЛЕНИЯ ===
 
-    // Группа элементов для загрузки данных
+    // Группа загрузки данных
     CreateWindowW(L"BUTTON", L"1. ЗАГРУЗКА ДАННЫХ",
-        WS_VISIBLE | WS_CHILD | BS_GROUPBOX,  // GroupBox для визуального группирования
+        WS_VISIBLE | WS_CHILD | BS_GROUPBOX,
         20, 80, 400, 100, hWnd, nullptr, hInst, nullptr);
 
-    // Кнопка загрузки CSV файла
     hLoadBtn = CreateWindowW(L"BUTTON", L"📁 Загрузить CSV файл",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
         40, 110, 180, 35, hWnd, (HMENU)ID_LOAD_BUTTON, hInst, nullptr);
 
-    // Кнопка очистки загруженных данных
     hClearBtn = CreateWindowW(L"BUTTON", L"🗑️ Очистить данные",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
         240, 110, 160, 35, hWnd, (HMENU)ID_CLEAR_BUTTON, hInst, nullptr);
 
-    // === ГРУППА ПАРАМЕТРОВ КЛАСТЕРИЗАЦИИ ===
+    // Группа параметров
     CreateWindowW(L"BUTTON", L"2. ПАРАМЕТРЫ КЛАСТЕРИЗАЦИИ",
         WS_VISIBLE | WS_CHILD | BS_GROUPBOX,
         20, 200, 400, 160, hWnd, nullptr, hInst, nullptr);
 
-    // Параметр K (количество кластеров)
     CreateWindowW(L"STATIC", L"Количество кластеров (k):",
         WS_VISIBLE | WS_CHILD,
         40, 230, 180, 20, hWnd, nullptr, hInst, nullptr);
-    
-    hKInput = CreateWindowW(L"EDIT", L"3",  // Значение по умолчанию = 3
-        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_NUMBER,  // Только числовой ввод
+    hKInput = CreateWindowW(L"EDIT", L"3",
+        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_NUMBER,
         230, 228, 60, 25, hWnd, (HMENU)ID_K_INPUT, hInst, nullptr);
 
-    // Подпись с допустимым диапазоном значений K
     hKRangeLabel = CreateWindowW(L"STATIC", L"(2-8)",
         WS_VISIBLE | WS_CHILD,
         300, 230, 80, 20, hWnd, nullptr, hInst, nullptr);
 
-    // Параметр порога сходимости
     CreateWindowW(L"STATIC", L"Порог сходимости:",
         WS_VISIBLE | WS_CHILD,
         40, 260, 150, 20, hWnd, nullptr, hInst, nullptr);
-    
-    hThresholdInput = CreateWindowW(L"EDIT", L"0.01",  // Значение по умолчанию
+    hThresholdInput = CreateWindowW(L"EDIT", L"0.01",
         WS_VISIBLE | WS_CHILD | WS_BORDER,
         200, 258, 80, 25, hWnd, (HMENU)ID_THRESHOLD_INPUT, hInst, nullptr);
 
-    // Подпись с допустимым диапазоном порога сходимости
+    // ДОБАВЛЕНО создание переменной для диапазона порога сходимости
     hThresholdRange = CreateWindowW(L"STATIC", L"(0.001-0.1)",
         WS_VISIBLE | WS_CHILD,
         290, 260, 80, 20, hWnd, nullptr, hInst, nullptr);
 
-    // Параметр максимального количества итераций
     CreateWindowW(L"STATIC", L"Максимум итераций:",
         WS_VISIBLE | WS_CHILD,
         40, 290, 150, 20, hWnd, nullptr, hInst, nullptr);
-    
-    hMaxIterInput = CreateWindowW(L"EDIT", L"100",  // Значение по умолчанию
+    hMaxIterInput = CreateWindowW(L"EDIT", L"100",
         WS_VISIBLE | WS_CHILD | WS_BORDER | ES_NUMBER,
         200, 288, 80, 25, hWnd, (HMENU)ID_MAX_ITER_INPUT, hInst, nullptr);
 
-    // Подпись с допустимым диапазоном количества итераций
+    // ДОБАВЛЕНО создание переменной для диапазона итераций
     hIterRange = CreateWindowW(L"STATIC", L"(5-500)",
         WS_VISIBLE | WS_CHILD,
         290, 290, 80, 20, hWnd, nullptr, hInst, nullptr);
 
-    // === ГРУППА ВЫПОЛНЕНИЯ АНАЛИЗА ===
+    // Группа выполнения
     CreateWindowW(L"BUTTON", L"3. ВЫПОЛНЕНИЕ АНАЛИЗА",
         WS_VISIBLE | WS_CHILD | BS_GROUPBOX,
         20, 380, 400, 120, hWnd, nullptr, hInst, nullptr);
 
-    // Главная кнопка запуска кластеризации
     hCalcBtn = CreateWindowW(L"BUTTON", L"🚀 ЗАПУСТИТЬ КЛАСТЕРИЗАЦИЮ",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
         40, 410, 360, 45, hWnd, (HMENU)ID_CALC_BUTTON, hInst, nullptr);
 
-    // Индикатор прогресса выполнения алгоритма
+    // Прогресс-бар
     hProgressBar = CreateWindowW(PROGRESS_CLASS, nullptr,
-        WS_VISIBLE | WS_CHILD | PBS_SMOOTH,  // Плавная анимация
+        WS_VISIBLE | WS_CHILD | PBS_SMOOTH,
         40, 465, 360, 20, hWnd, nullptr, hInst, nullptr);
 
-    // === ГРУППА ЭКСПОРТА РЕЗУЛЬТАТОВ ===
+    // Группа экспорта
     CreateWindowW(L"BUTTON", L"4. ЭКСПОРТ РЕЗУЛЬТАТОВ",
         WS_VISIBLE | WS_CHILD | BS_GROUPBOX,
         20, 520, 400, 80, hWnd, nullptr, hInst, nullptr);
 
-    // Кнопка экспорта детального отчета
     hExportBtn = CreateWindowW(L"BUTTON", L"💾 Экспорт полного отчета",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
         40, 550, 360, 35, hWnd, (HMENU)ID_EXPORT_BUTTON, hInst, nullptr);
 
     // === ПРАВАЯ ПАНЕЛЬ РЕЗУЛЬТАТОВ ===
 
-    // Заголовок секции результатов
+    // Заголовок результатов
     CreateWindowW(L"STATIC", L"📊 РЕЗУЛЬТАТЫ АНАЛИЗА",
         WS_VISIBLE | WS_CHILD | SS_CENTER,
         450, 80, 1100, 30, hWnd, nullptr, hInst, nullptr);
 
-    // Строка статуса с подписью
+    // Статус
     CreateWindowW(L"STATIC", L"Статус:",
         WS_VISIBLE | WS_CHILD,
         450, 120, 60, 20, hWnd, nullptr, hInst, nullptr);
-    
-    // Многострочное текстовое поле для отображения текущего статуса
     hStatusText = CreateWindowW(L"EDIT", L"",
         WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL,
         520, 120, 1030, 60, hWnd, nullptr, hInst, nullptr);
 
-    // Создание системы вкладок для организации результатов
+    // Создаем вкладки
     CreateTabControl(hWnd);
 
-    // === ПРИМЕНЕНИЕ ШРИФТОВ К ЭЛЕМЕНТАМ ===
+    // Устанавливаем шрифты
     SendMessage(hLoadBtn, WM_SETFONT, (WPARAM)hFontButton, TRUE);
     SendMessage(hClearBtn, WM_SETFONT, (WPARAM)hFontButton, TRUE);
     SendMessage(hCalcBtn, WM_SETFONT, (WPARAM)hFontButton, TRUE);
@@ -393,34 +307,27 @@ void CreateInterface(HWND hWnd)
     SendMessage(hMaxIterInput, WM_SETFONT, (WPARAM)hFontText, TRUE);
     SendMessage(hStatusText, WM_SETFONT, (WPARAM)hFontText, TRUE);
 
-    // Применение специального шрифта к подписям диапазонов
+    // ИСПРАВЛЕНО: Применяем новый жирный шрифт ко всем диапазонам
     SendMessage(hKRangeLabel, WM_SETFONT, (WPARAM)hFontRange, TRUE);
     SendMessage(hThresholdRange, WM_SETFONT, (WPARAM)hFontRange, TRUE);
     SendMessage(hIterRange, WM_SETFONT, (WPARAM)hFontRange, TRUE);
 }
 
-// Обновление подписи диапазона для параметра K в зависимости от количества загруженных точек
 void UpdateKRangeLabel()
 {
     if (points.empty()) {
-        // Если данные не загружены, показываем минимальное значение
         SetWindowTextW(hKRangeLabel, L"(min - 2)");
     }
     else {
-        // Максимальное K не может превышать количество точек данных
         std::wstring rangeText = L"(2-" + std::to_wstring(points.size()) + L")";
         SetWindowTextW(hKRangeLabel, rangeText.c_str());
     }
 }
 
-// ============================================================================
-// СОЗДАНИЕ СИСТЕМЫ ВКЛАДОК ДЛЯ РЕЗУЛЬТАТОВ
-// ============================================================================
-
-// Создание TabControl и всех связанных таблиц
+// ИСПРАВЛЕНА функция CreateTabControl с правильными размерами столбцов
 void CreateTabControl(HWND hWnd)
 {
-    // Создание основного контрола вкладок
+    // Создаем Tab Control
     hTabControl = CreateWindowW(WC_TABCONTROL, L"",
         WS_VISIBLE | WS_CHILD | TCS_TABS,
         450, 200, 1100, 750, hWnd, nullptr, hInst, nullptr);
@@ -430,97 +337,86 @@ void CreateTabControl(HWND hWnd)
         return;
     }
 
-    // Добавление вкладок с иконками и названиями
+    // Добавляем вкладки
     TCITEM tie;
-    tie.mask = TCIF_TEXT;  // Указываем, что устанавливаем только текст
+    tie.mask = TCIF_TEXT;
 
-    // Вкладка 1: Общая информация о процессе кластеризации
     tie.pszText = (LPWSTR)L"📋 Общая информация";
     TabCtrl_InsertItem(hTabControl, 0, &tie);
 
-    // Вкладка 2: Детальная информация о каждом кластере
     tie.pszText = (LPWSTR)L"🎯 Кластеры";
     TabCtrl_InsertItem(hTabControl, 1, &tie);
 
-    // Вкладка 3: Информация о каждой точке данных
     tie.pszText = (LPWSTR)L"📍 Точки данных";
     TabCtrl_InsertItem(hTabControl, 2, &tie);
 
-    // Вкладка 4: Статистические метрики качества кластеризации
     tie.pszText = (LPWSTR)L"📊 Статистика";
     TabCtrl_InsertItem(hTabControl, 3, &tie);
 
-    // Получение области для размещения таблиц внутри вкладок
+    // Создаем таблицы для каждой вкладки
     RECT tabRect;
     GetClientRect(hTabControl, &tabRect);
-    TabCtrl_AdjustRect(hTabControl, FALSE, &tabRect);  // Корректировка с учетом заголовков вкладок
+    TabCtrl_AdjustRect(hTabControl, FALSE, &tabRect);
 
-    // === СОЗДАНИЕ ТАБЛИЦ ДЛЯ КАЖДОЙ ВКЛАДКИ ===
-
-    // Таблица общих результатов (вкладка 1)
+    // Таблица общих результатов
     hResultsList = CreateListView(hTabControl, tabRect.left + 10, tabRect.top + 10,
         tabRect.right - tabRect.left - 20, tabRect.bottom - tabRect.top - 20, ID_RESULTS_LIST);
-    AddListColumn(hResultsList, L"Параметр", 200, 0);      // Название параметра
-    AddListColumn(hResultsList, L"Значение", 150, 1);      // Значение параметра
-    AddListColumn(hResultsList, L"Описание", 700, 2);      // Подробное описание
+    AddListColumn(hResultsList, L"Параметр", 200, 0);
+    AddListColumn(hResultsList, L"Значение", 150, 1);
+    AddListColumn(hResultsList, L"Описание", 700, 2);
 
-    // Таблица информации о кластерах (вкладка 2)
+    // Таблица кластеров - ИСПРАВЛЕНЫ РАЗМЕРЫ СТОЛБЦОВ
     hClustersList = CreateListView(hTabControl, tabRect.left + 10, tabRect.top + 10,
         tabRect.right - tabRect.left - 20, tabRect.bottom - tabRect.top - 20, ID_CLUSTERS_LIST);
-    AddListColumn(hClustersList, L"Кластер", 80, 0);           // Номер кластера
-    AddListColumn(hClustersList, L"Точек", 80, 1);             // Количество точек в кластере
-    AddListColumn(hClustersList, L"Процент", 80, 2);           // Процент от общего количества точек
-    AddListColumn(hClustersList, L"Центроид", 400, 3);         // Координаты центроида
-    AddListColumn(hClustersList, L"Ср. расстояние", 120, 4);   // Среднее расстояние до центроида
-    AddListColumn(hClustersList, L"Компактность", 120, 5);     // Коэффициент компактности
-    AddListColumn(hClustersList, L"Качество", 130, 6);         // Оценка качества кластера
+    AddListColumn(hClustersList, L"Кластер", 80, 0);
+    AddListColumn(hClustersList, L"Точек", 80, 1);
+    AddListColumn(hClustersList, L"Процент", 80, 2);
+    AddListColumn(hClustersList, L"Центроид", 350, 3);  // Уменьшено с 500 до 350
+    AddListColumn(hClustersList, L"Ср. расстояние", 120, 4);
+    AddListColumn(hClustersList, L"Компактность", 120, 5);
+    AddListColumn(hClustersList, L"Качество", 130, 6);
 
-    // Таблица точек данных (вкладка 3)
+    // Таблица точек - ИСПРАВЛЕНЫ РАЗМЕРЫ СТОЛБЦОВ ДЛЯ ПРАВИЛЬНОГО ОТОБРАЖЕНИЯ
     hPointsList = CreateListView(hTabControl, tabRect.left + 10, tabRect.top + 10,
         tabRect.right - tabRect.left - 20, tabRect.bottom - tabRect.top - 20, ID_POINTS_LIST);
-    AddListColumn(hPointsList, L"Точка", 80, 0);                      // Номер точки
-    AddListColumn(hPointsList, L"Кластер", 80, 1);                    // Назначенный кластер
-    AddListColumn(hPointsList, L"Координаты", 600, 2);                // Координаты точки
-    AddListColumn(hPointsList, L"Расстояние до центроида", 150, 3);   // Расстояние до центроида кластера
-    AddListColumn(hPointsList, L"Статус", 150, 4);                    // Статус точки в кластере
+    AddListColumn(hPointsList, L"Точка", 80, 0);
+    AddListColumn(hPointsList, L"Кластер", 80, 1);
+    AddListColumn(hPointsList, L"Координаты", 400, 2);  // ИСПРАВЛЕНО: уменьшено с 1200 до 400
+    AddListColumn(hPointsList, L"Расстояние до центроида", 180, 3);
+    AddListColumn(hPointsList, L"Статус", 150, 4);
 
-    // Таблица статистических метрик (вкладка 4)
+    // Таблица статистики
     hStatsList = CreateListView(hTabControl, tabRect.left + 10, tabRect.top + 10,
         tabRect.right - tabRect.left - 20, tabRect.bottom - tabRect.top - 20, ID_STATS_LIST);
-    AddListColumn(hStatsList, L"Метрика", 200, 0);         // Название метрики
-    AddListColumn(hStatsList, L"Значение", 150, 1);        // Значение метрики
-    AddListColumn(hStatsList, L"Интерпретация", 700, 2);   // Интерпретация значения
+    AddListColumn(hStatsList, L"Метрика", 200, 0);
+    AddListColumn(hStatsList, L"Значение", 150, 1);
+    AddListColumn(hStatsList, L"Интерпретация", 700, 2);
 
-    // Применение шрифтов ко всем таблицам
+    // Устанавливаем шрифты
     SendMessage(hResultsList, WM_SETFONT, (WPARAM)hFontText, TRUE);
     SendMessage(hClustersList, WM_SETFONT, (WPARAM)hFontText, TRUE);
     SendMessage(hPointsList, WM_SETFONT, (WPARAM)hFontText, TRUE);
     SendMessage(hStatsList, WM_SETFONT, (WPARAM)hFontText, TRUE);
 
-    // Показываем первую вкладку по умолчанию
+    // Показываем первую вкладку
     ShowTabContent(0);
 }
 
-// ============================================================================
-// ФУНКЦИИ УПРАВЛЕНИЯ ИНТЕРФЕЙСОМ
-// ============================================================================
-
-// Обработка изменения размеров окна
+// ИСПРАВЛЕНА функция ResizeInterface с улучшенной обработкой размеров
 void ResizeInterface(HWND hWnd, int width, int height)
 {
-    // Установка минимальных размеров окна для корректного отображения
     if (width < 1400) width = 1400;
     if (height < 900) height = 900;
 
-    // Изменение размера контрола вкладок
+    // Изменяем размер TabControl
     if (hTabControl)
         SetWindowPos(hTabControl, NULL, 450, 200, width - 480, height - 240, SWP_NOZORDER);
 
-    // Изменение размера поля статуса
+    // Изменяем размер поля статуса
     if (hStatusText)
         SetWindowPos(hStatusText, NULL, 520, 120, width - 550, 60, SWP_NOZORDER);
 
-    // Обновление размеров всех таблиц внутри вкладок
+    // Обновляем размеры таблиц внутри вкладок
     if (hTabControl) {
         RECT tabRect;
         GetClientRect(hTabControl, &tabRect);
@@ -529,19 +425,24 @@ void ResizeInterface(HWND hWnd, int width, int height)
         int tableWidth = tabRect.right - tabRect.left - 20;
         int tableHeight = tabRect.bottom - tabRect.top - 20;
 
-        // Изменение размеров всех таблиц
-        if (hResultsList)
-            SetWindowPos(hResultsList, NULL, tabRect.left + 10, tabRect.top + 10, tableWidth, tableHeight, SWP_NOZORDER);
-        if (hClustersList)
-            SetWindowPos(hClustersList, NULL, tabRect.left + 10, tabRect.top + 10, tableWidth, tableHeight, SWP_NOZORDER);
-        if (hPointsList)
-            SetWindowPos(hPointsList, NULL, tabRect.left + 10, tabRect.top + 10, tableWidth, tableHeight, SWP_NOZORDER);
-        if (hStatsList)
-            SetWindowPos(hStatsList, NULL, tabRect.left + 10, tabRect.top + 10, tableWidth, tableHeight, SWP_NOZORDER);
+        // Убеждаемся, что размеры положительные
+        if (tableWidth > 0 && tableHeight > 0) {
+            if (hResultsList)
+                SetWindowPos(hResultsList, NULL, tabRect.left + 10, tabRect.top + 10,
+                    tableWidth, tableHeight, SWP_NOZORDER);
+            if (hClustersList)
+                SetWindowPos(hClustersList, NULL, tabRect.left + 10, tabRect.top + 10,
+                    tableWidth, tableHeight, SWP_NOZORDER);
+            if (hPointsList)
+                SetWindowPos(hPointsList, NULL, tabRect.left + 10, tabRect.top + 10,
+                    tableWidth, tableHeight, SWP_NOZORDER);
+            if (hStatsList)
+                SetWindowPos(hStatsList, NULL, tabRect.left + 10, tabRect.top + 10,
+                    tableWidth, tableHeight, SWP_NOZORDER);
+        }
     }
 }
 
-// Переключение между вкладками - показ соответствующей таблицы
 void ShowTabContent(int tabIndex)
 {
     // Скрываем все таблицы
@@ -550,109 +451,108 @@ void ShowTabContent(int tabIndex)
     ShowWindow(hPointsList, SW_HIDE);
     ShowWindow(hStatsList, SW_HIDE);
 
-    // Показываем таблицу для выбранной вкладки
+    // Показываем нужную таблицу
     switch (tabIndex)
     {
-    case 0: ShowWindow(hResultsList, SW_SHOW); break;   // Общая информация
-    case 1: ShowWindow(hClustersList, SW_SHOW); break;  // Кластеры
-    case 2: ShowWindow(hPointsList, SW_SHOW); break;    // Точки данных
-    case 3: ShowWindow(hStatsList, SW_SHOW); break;     // Статистика
+    case 0: ShowWindow(hResultsList, SW_SHOW); break;
+    case 1: ShowWindow(hClustersList, SW_SHOW); break;
+    case 2: ShowWindow(hPointsList, SW_SHOW); break;
+    case 3: ShowWindow(hStatsList, SW_SHOW); break;
     }
 }
 
-// ============================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С ТАБЛИЦАМИ
-// ============================================================================
-
-// Создание ListView с настройками для отображения табличных данных
+// ИСПРАВЛЕНА функция CreateListView с правильными скроллбарами
 HWND CreateListView(HWND parent, int x, int y, int w, int h, int id)
 {
     HWND hList = CreateWindowW(WC_LISTVIEW, L"",
-        WS_VISIBLE | WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+        WS_VISIBLE | WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL |
+        LVS_SHOWSELALWAYS | WS_VSCROLL | WS_HSCROLL,  // ОСТАВЛЕНЫ ОБА СКРОЛЛБАРА
         x, y, w, h, parent, (HMENU)id, hInst, nullptr);
 
-    // Установка расширенных стилей для лучшего внешнего вида
-    ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+    // Устанавливаем расширенные стили для лучшего отображения
+    ListView_SetExtendedListViewStyle(hList,
+        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP);
+
     return hList;
 }
 
-// Добавление колонки в таблицу ListView
+// ДОБАВЛЕНА новая функция для автоматического изменения размера столбцов
+void AutoResizeColumns(HWND hListView)
+{
+    int columnCount = Header_GetItemCount(ListView_GetHeader(hListView));
+
+    for (int i = 0; i < columnCount; i++) {
+        ListView_SetColumnWidth(hListView, i, LVSCW_AUTOSIZE_USEHEADER);
+
+        // Получаем ширину после автоматического изменения размера
+        int autoWidth = ListView_GetColumnWidth(hListView, i);
+
+        // Устанавливаем минимальную ширину
+        int minWidth = 80;
+        if (autoWidth < minWidth) {
+            ListView_SetColumnWidth(hListView, i, minWidth);
+        }
+    }
+}
+
 void AddListColumn(HWND hList, LPCWSTR text, int width, int index)
 {
     LVCOLUMN lvc = { 0 };
-    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;  // Устанавливаем текст, ширину и индекс
-    lvc.pszText = (LPWSTR)text;    // Заголовок колонки
-    lvc.cx = width;                // Ширина колонки в пикселях
-    lvc.iSubItem = index;          // Индекс колонки
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+    lvc.pszText = (LPWSTR)text;
+    lvc.cx = width;
+    lvc.iSubItem = index;
     ListView_InsertColumn(hList, index, &lvc);
 }
 
-// Добавление элемента (ячейки) в таблицу ListView
 void AddListItem(HWND hList, int item, int subitem, LPCWSTR text)
 {
     LVITEM lvi = { 0 };
-    lvi.mask = LVIF_TEXT;      // Устанавливаем только текст
-    lvi.iItem = item;          // Номер строки
-    lvi.iSubItem = subitem;    // Номер колонки
-    lvi.pszText = (LPWSTR)text; // Текст ячейки
+    lvi.mask = LVIF_TEXT;
+    lvi.iItem = item;
+    lvi.iSubItem = subitem;
+    lvi.pszText = (LPWSTR)text;
 
     if (subitem == 0) {
-        // Если это первая колонка, создаем новую строку
         ListView_InsertItem(hList, &lvi);
     }
     else {
-        // Иначе устанавливаем текст в существующую ячейку
         ListView_SetItem(hList, &lvi);
     }
 }
 
-// Очистка всех элементов из таблицы
 void ClearList(HWND hList)
 {
     ListView_DeleteAllItems(hList);
 }
 
-// ============================================================================
-// ФУНКЦИИ ОТОБРАЖЕНИЯ РАЗЛИЧНЫХ СОСТОЯНИЙ ПРИЛОЖЕНИЯ
-// ============================================================================
-
-// Отображение приветственного экрана при запуске приложения
 void ShowWelcomeScreen()
 {
-    // Обновляем статус с инструкциями для пользователя
     UpdateStatus(L"Добро пожаловать в профессиональный анализатор кластеризации K-means!\r\n\r\nДля начала работы:\r\n1. Загрузите CSV файл с данными\r\n2. Настройте параметры\r\n3. Запустите анализ");
 
-    // Заполняем таблицу общей информации базовой информацией о системе
+    // Заполняем таблицу общей информации
     ClearList(hResultsList);
-    
-    // Статус системы
     AddListItem(hResultsList, 0, 0, L"Статус системы");
     AddListItem(hResultsList, 0, 1, L"Готов к работе");
     AddListItem(hResultsList, 0, 2, L"Система готова к загрузке и анализу данных");
 
-    // Информация об используемом алгоритме
     AddListItem(hResultsList, 1, 0, L"Алгоритм");
     AddListItem(hResultsList, 1, 1, L"K-means++");
     AddListItem(hResultsList, 1, 2, L"Улучшенная инициализация центроидов для лучших результатов");
 
-    // Поддерживаемые форматы файлов
     AddListItem(hResultsList, 2, 0, L"Поддерживаемые форматы");
     AddListItem(hResultsList, 2, 1, L"CSV, TXT");
-    AddListItem(hResultsList, 2, 2, L"Файлы с числовыми данными, разделенными запятыми");
+    AddListItem(hResultsList, 2, 2, L"Файлы с числовыми данными, разделенными запятыми или точкой с запятой");
 
-    // Очищаем остальные таблицы
     ClearList(hClustersList);
     ClearList(hPointsList);
     ClearList(hStatsList);
 
-    // Обновляем подпись диапазона для параметра K
     UpdateKRangeLabel();
 }
 
-// Отображение информации после успешной загрузки данных
 void ShowDataLoadedInfo()
 {
-    // Формируем сообщение о загруженных данных
     std::wstringstream status;
     status << L"Данные успешно загружены!\r\n\r\n";
     status << L"Количество точек: " << points.size() << L"\r\n";
@@ -660,16 +560,13 @@ void ShowDataLoadedInfo()
     status << L"Готов к кластеризации!";
     UpdateStatus(status.str());
 
-    // Обновляем таблицы с информацией о загруженных данных
-    PopulateResultsTable();  // Общая информация
-    PopulatePointsTable();   // Таблица точек данных
-    UpdateKRangeLabel();     // Обновляем допустимый диапазон K
+    PopulateResultsTable();
+    PopulatePointsTable();
+    UpdateKRangeLabel();
 }
 
-// Отображение результатов после завершения кластеризации
 void ShowClusteringResults()
 {
-    // Формируем сообщение о результатах кластеризации
     std::wstringstream status;
     status << L"Кластеризация завершена!\r\n\r\n";
     status << L"Выполнено итераций: " << currentIteration << L"/" << maxIterations << L"\r\n";
@@ -677,31 +574,22 @@ void ShowClusteringResults()
     status << L"Общая ошибка SSE: " << std::fixed << std::setprecision(4) << totalSSE;
     UpdateStatus(status.str());
 
-    // Заполняем все таблицы результатами
-    PopulateResultsTable();   // Общие результаты
-    PopulateClustersTable();  // Информация о кластерах
-    PopulatePointsTable();    // Обновленная информация о точках
-    PopulateStatsTable();     // Статистические метрики
+    PopulateResultsTable();
+    PopulateClustersTable();
+    PopulatePointsTable();
+    PopulateStatsTable();
 }
 
-// Обновление текста в поле статуса
 void UpdateStatus(const std::wstring& message)
 {
     SetWindowTextW(hStatusText, message.c_str());
 }
 
-// ============================================================================
-// ФУНКЦИИ ЗАПОЛНЕНИЯ ТАБЛИЦ ДАННЫМИ
-// ============================================================================
-
-// Заполнение таблицы общих результатов
 void PopulateResultsTable()
 {
     ClearList(hResultsList);
 
     if (clusters.empty()) {
-        // Если кластеризация еще не выполнена, показываем информацию о загруженных данных
-        
         AddListItem(hResultsList, 0, 0, L"Статус данных");
         AddListItem(hResultsList, 0, 1, L"Загружены");
         AddListItem(hResultsList, 0, 2, L"Данные успешно загружены и готовы для анализа");
@@ -717,30 +605,24 @@ void PopulateResultsTable()
         AddListItem(hResultsList, 2, 2, L"Количество измерений (признаков) каждой точки");
     }
     else {
-        // Если кластеризация выполнена, показываем результаты
-        
         AddListItem(hResultsList, 0, 0, L"Статус кластеризации");
         AddListItem(hResultsList, 0, 1, L"Завершена");
         AddListItem(hResultsList, 0, 2, L"Алгоритм K-means успешно выполнен");
 
-        // Информация об итерациях
         std::wstring iterStr = std::to_wstring(currentIteration) + L"/" + std::to_wstring(maxIterations);
         AddListItem(hResultsList, 1, 0, L"Итерации");
         AddListItem(hResultsList, 1, 1, iterStr.c_str());
         AddListItem(hResultsList, 1, 2, L"Количество выполненных итераций алгоритма");
 
-        // Информация о сходимости
         AddListItem(hResultsList, 2, 0, L"Сходимость");
         AddListItem(hResultsList, 2, 1, isConverged ? L"Достигнута" : L"Не достигнута");
         AddListItem(hResultsList, 2, 2, isConverged ? L"Алгоритм сошелся к оптимальному решению" : L"Требуется больше итераций");
 
-        // Количество кластеров
         std::wstring kStr = std::to_wstring(k);
         AddListItem(hResultsList, 3, 0, L"Количество кластеров");
         AddListItem(hResultsList, 3, 1, kStr.c_str());
         AddListItem(hResultsList, 3, 2, L"Заданное количество кластеров для анализа");
 
-        // Общая ошибка SSE (Sum of Squared Errors)
         std::wstringstream sseStr;
         sseStr << std::fixed << std::setprecision(6) << totalSSE;
         AddListItem(hResultsList, 4, 0, L"Общая ошибка (SSE)");
@@ -749,25 +631,18 @@ void PopulateResultsTable()
     }
 }
 
-// Заполнение таблицы информации о кластерах
 void PopulateClustersTable()
 {
     ClearList(hClustersList);
 
-    // Проходим по всем кластерам и заполняем информацию
     for (int i = 0; i < k; i++) {
-        // Номер кластера (начиная с 1 для пользователя)
         std::wstring clusterNum = std::to_wstring(i + 1);
-        
-        // Количество точек в кластере
         std::wstring pointCount = std::to_wstring(clusters[i].pointCount);
 
-        // Процент точек от общего количества
         double percentage = (clusters[i].pointCount * 100.0) / points.size();
         std::wstringstream percentStr;
         percentStr << std::fixed << std::setprecision(1) << percentage << L"%";
 
-        // Координаты центроида кластера
         std::wstringstream centroidStr;
         centroidStr << L"(";
         for (size_t j = 0; j < clusters[i].centroid.size(); j++) {
@@ -776,22 +651,18 @@ void PopulateClustersTable()
         }
         centroidStr << L")";
 
-        // Среднее расстояние от точек до центроида
         std::wstringstream avgDistStr;
         avgDistStr << std::fixed << std::setprecision(6) << clusters[i].avgDistance;
 
-        // Коэффициент компактности кластера (в процентах)
         std::wstringstream compactnessStr;
         compactnessStr << std::fixed << std::setprecision(1) << (clusters[i].compactness * 100) << L"%";
 
-        // Качественная оценка кластера на основе компактности
         std::wstring quality;
         if (clusters[i].compactness > 0.8) quality = L"Отличное";
         else if (clusters[i].compactness > 0.6) quality = L"Хорошее";
         else if (clusters[i].compactness > 0.4) quality = L"Среднее";
         else quality = L"Низкое";
 
-        // Добавляем строку в таблицу
         AddListItem(hClustersList, i, 0, clusterNum.c_str());
         AddListItem(hClustersList, i, 1, pointCount.c_str());
         AddListItem(hClustersList, i, 2, percentStr.str().c_str());
@@ -802,17 +673,13 @@ void PopulateClustersTable()
     }
 }
 
-// Заполнение таблицы информации о точках данных
 void PopulatePointsTable()
 {
     ClearList(hPointsList);
 
-    // Проходим по всем точкам данных
     for (size_t i = 0; i < points.size(); i++) {
-        // Номер точки (начиная с 1 для пользователя)
         std::wstring pointNum = std::to_wstring(i + 1);
 
-        // Назначенный кластер
         std::wstring clusterStr;
         if (points[i].clusterLabel >= 0) {
             clusterStr = std::to_wstring(points[i].clusterLabel + 1);
@@ -821,7 +688,6 @@ void PopulatePointsTable()
             clusterStr = L"Не назначен";
         }
 
-        // Координаты точки
         std::wstringstream coordsStr;
         coordsStr << L"(";
         for (size_t j = 0; j < points[i].coords.size(); j++) {
@@ -830,60 +696,66 @@ void PopulatePointsTable()
         }
         coordsStr << L")";
 
-        // Расстояние до центроида и статус точки
         std::wstring distanceStr = L"-";
         std::wstring statusStr = L"Ожидает кластеризации";
 
         if (points[i].clusterLabel >= 0 && points[i].clusterLabel < (int)clusters.size()) {
-            // Вычисляем расстояние до центроида назначенного кластера
             double distance = CalculateEuclideanDistance(points[i].coords, clusters[points[i].clusterLabel].centroid);
             std::wstringstream distStr;
             distStr << std::fixed << std::setprecision(6) << distance;
             distanceStr = distStr.str();
 
-            // Определяем статус точки относительно кластера
             if (distance < clusters[points[i].clusterLabel].avgDistance * 0.8) {
-                statusStr = L"Близко к центру";      // Точка близко к центроиду
+                statusStr = L"Близко к центру";
             }
             else if (distance > clusters[points[i].clusterLabel].avgDistance * 1.5) {
-                statusStr = L"На периферии";          // Точка далеко от центроида
+                statusStr = L"На периферии";
             }
             else {
-                statusStr = L"Типичная точка";        // Точка на среднем расстоянии
+                statusStr = L"Типичная точка";
             }
         }
 
-        // Добавляем строку в таблицу
         AddListItem(hPointsList, static_cast<int>(i), 0, pointNum.c_str());
         AddListItem(hPointsList, static_cast<int>(i), 1, clusterStr.c_str());
         AddListItem(hPointsList, static_cast<int>(i), 2, coordsStr.str().c_str());
         AddListItem(hPointsList, static_cast<int>(i), 3, distanceStr.c_str());
         AddListItem(hPointsList, static_cast<int>(i), 4, statusStr.c_str());
     }
+
+    // ДОБАВЛЕНО: Добавляем пустые строки для возможности прокрутки до конца
+    int emptyRowsCount = 20; // Количество пустых строк для прокрутки
+    for (int emptyRow = 0; emptyRow < emptyRowsCount; emptyRow++) {
+        int rowIndex = static_cast<int>(points.size()) + emptyRow;
+        AddListItem(hPointsList, rowIndex, 0, L"");
+        AddListItem(hPointsList, rowIndex, 1, L"");
+        AddListItem(hPointsList, rowIndex, 2, L"");
+        AddListItem(hPointsList, rowIndex, 3, L"");
+        AddListItem(hPointsList, rowIndex, 4, L"");
+    }
+
+    // ДОБАВЛЕНО: Автоматическое изменение размера столбцов после заполнения
+    // AutoResizeColumns(hPointsList);  // Раскомментируйте если хотите автоматический размер
 }
 
-// Заполнение таблицы статистических метрик
 void PopulateStatsTable()
 {
     ClearList(hStatsList);
 
-    int row = 0;  // Счетчик строк
+    int row = 0;
 
-    // Общее количество точек данных
     std::wstringstream totalPointsStr;
     totalPointsStr << points.size();
     AddListItem(hStatsList, row, 0, L"Общее количество точек");
     AddListItem(hStatsList, row, 1, totalPointsStr.str().c_str());
     AddListItem(hStatsList, row++, 2, L"Количество точек данных, участвующих в кластеризации");
 
-    // Средняя квадратичная ошибка на точку
     double avgSSE = totalSSE / points.size();
     std::wstringstream avgSSEStr;
     avgSSEStr << std::fixed << std::setprecision(6) << avgSSE;
     AddListItem(hStatsList, row, 0, L"Средняя квадратичная ошибка");
     AddListItem(hStatsList, row, 1, avgSSEStr.str().c_str());
 
-    // Интерпретация качества кластеризации на основе SSE
     std::wstring sseInterpretation;
     if (avgSSE < 1.0) sseInterpretation = L"Отличное качество кластеризации";
     else if (avgSSE < 5.0) sseInterpretation = L"Хорошее качество кластеризации";
@@ -892,11 +764,8 @@ void PopulateStatsTable()
 
     AddListItem(hStatsList, row++, 2, sseInterpretation.c_str());
 
-    // Анализ баланса кластеров
     double avgClusterSize = (double)points.size() / k;
     bool balanced = true;
-    
-    // Проверяем, не слишком ли сильно различаются размеры кластеров
     for (const auto& cluster : clusters) {
         if (cluster.pointCount < avgClusterSize * 0.3 || cluster.pointCount > avgClusterSize * 2.0) {
             balanced = false;
@@ -908,31 +777,22 @@ void PopulateStatsTable()
     AddListItem(hStatsList, row, 1, balanced ? L"Сбалансированы" : L"Несбалансированы");
     AddListItem(hStatsList, row++, 2, balanced ? L"Кластеры имеют примерно равные размеры" : L"Размеры кластеров сильно различаются");
 
-    // Информация о сходимости алгоритма
     AddListItem(hStatsList, row, 0, L"Сходимость алгоритма");
     AddListItem(hStatsList, row, 1, isConverged ? L"Достигнута" : L"Не достигнута");
     AddListItem(hStatsList, row++, 2, isConverged ? L"Алгоритм нашел стабильное решение" : L"Увеличьте количество итераций");
 }
-
-// ============================================================================
-// ГЛАВНАЯ ОКОННАЯ ПРОЦЕДУРА - ОБРАБОТЧИК ВСЕХ СООБЩЕНИЙ
-// ============================================================================
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
     case WM_SIZE:
-        // Обработка изменения размера окна
         ResizeInterface(hWnd, LOWORD(lParam), HIWORD(lParam));
         break;
 
     case WM_NOTIFY:
     {
-        // Обработка уведомлений от элементов управления
         LPNMHDR pnmh = (LPNMHDR)lParam;
-        
-        // Обработка переключения вкладок
         if (pnmh->hwndFrom == hTabControl && pnmh->code == TCN_SELCHANGE)
         {
             int selectedTab = TabCtrl_GetCurSel(hTabControl);
@@ -942,114 +802,124 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_COMMAND:
-        // Обработка команд от кнопок и других элементов
         switch (LOWORD(wParam))
         {
         case ID_LOAD_BUTTON:
-            LoadDataFile();           // Загрузка файла данных
+            LoadDataFile();
             break;
         case ID_CLEAR_BUTTON:
-            ClearAllData();           // Очистка всех данных
+            ClearAllData();
             break;
         case ID_CALC_BUTTON:
-            RunClusteringAnalysis();  // Запуск кластеризации
+            RunClusteringAnalysis();
             break;
         case ID_EXPORT_BUTTON:
-            ExportDetailedResults();  // Экспорт результатов
+            ExportDetailedResults();
             break;
         }
         break;
 
     case WM_DESTROY:
-        // Завершение работы приложения
         PostQuitMessage(0);
         break;
 
     default:
-        // Обработка всех остальных сообщений по умолчанию
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
 
-// ============================================================================
-// РЕАЛИЗАЦИЯ АЛГОРИТМА K-MEANS И СВЯЗАННЫХ ФУНКЦИЙ
-// ============================================================================
+// Реализация функций K-means алгоритма
 
-// Загрузка данных из CSV или текстового файла
+// ИСПРАВЛЕНА функция LoadDataFile с поддержкой разных разделителей
 void LoadDataFile()
 {
-    // Настройка диалога открытия файла
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = GetActiveWindow();
     ofn.lpstrFilter = L"CSV Files (*.csv)\0*.csv\0Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;  // Файл должен существовать
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
     if (GetOpenFileName(&ofn))
     {
-        ClearAllData();  // Очищаем предыдущие данные
-        
-        // Настройка прогресс-бара для отображения процесса загрузки
+        ClearAllData();
         SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
         SendMessage(hProgressBar, PBM_SETPOS, 10, 0);
         UpdateStatus(L"Загрузка файла...");
 
-        // Открытие файла для чтения в формате Unicode
         std::wifstream file(szFile);
         std::wstring line;
 
-        // Проверка первой строки на наличие заголовков (нечисловых данных)
+        // Определяем разделитель автоматически
+        wchar_t delimiter = L',';
         if (std::getline(file, line)) {
+            // Проверяем, какой разделитель используется
+            if (line.find(L';') != std::wstring::npos) {
+                delimiter = L';';
+            }
+            else if (line.find(L',') != std::wstring::npos) {
+                delimiter = L',';
+            }
+            else if (line.find(L'\t') != std::wstring::npos) {
+                delimiter = L'\t';
+            }
+
+            // Проверяем, является ли первая строка заголовком
             bool isHeader = false;
             std::wstringstream ss(line);
             std::wstring token;
-            
-            // Проверяем каждое значение в первой строке
-            while (std::getline(ss, token, L',')) {
-                try {
-                    std::stod(token);  // Пытаемся преобразовать в число
-                }
-                catch (...) {
-                    isHeader = true;   // Если не получается - это заголовок
-                    break;
+            while (std::getline(ss, token, delimiter)) {
+                // Удаляем пробелы
+                token.erase(std::remove_if(token.begin(), token.end(), ::iswspace), token.end());
+                if (!token.empty()) {
+                    try {
+                        std::stod(token);
+                    }
+                    catch (...) {
+                        isHeader = true;
+                        break;
+                    }
                 }
             }
 
-            // Если первая строка не заголовок, возвращаемся к началу файла
+            // Если не заголовок, возвращаемся к началу файла
             if (!isHeader) {
                 file.seekg(0);
             }
         }
 
-        // Чтение и парсинг всех строк данных
+        // Читаем данные
         while (std::getline(file, line))
         {
+            // Пропускаем пустые строки
+            if (line.empty()) continue;
+
             std::wstringstream ss(line);
             std::wstring token;
-            Point p;  // Создаем новую точку
-            p.originalIndex = static_cast<int>(points.size());  // Сохраняем исходный индекс
+            Point p;
+            p.originalIndex = static_cast<int>(points.size());
 
-            // Парсинг каждого значения в строке (разделенного запятыми)
-            while (std::getline(ss, token, L','))
+            // Парсим все столбцы с правильным разделителем
+            while (std::getline(ss, token, delimiter))
             {
                 try {
-                    // Удаляем пробелы из токена
+                    // Удаляем все пробельные символы
                     token.erase(std::remove_if(token.begin(), token.end(), ::iswspace), token.end());
-                    
+
                     if (!token.empty()) {
-                        double value = std::stod(token);  // Преобразуем в число
-                        
-                        // Проверяем, что число корректное (не NaN, не бесконечность)
+                        // Заменяем запятую на точку для десятичных чисел (если нужно)
+                        std::replace(token.begin(), token.end(), L',', L'.');
+
+                        double value = std::stod(token);
                         if (std::isfinite(value)) {
-                            p.coords.push_back(value);  // Добавляем координату к точке
+                            p.coords.push_back(value);
                         }
                     }
                 }
                 catch (const std::exception&) {
-                    // Игнорируем некорректные значения
+                    // Пропускаем некорректные значения, но продолжаем обработку строки
                     continue;
                 }
             }
@@ -1061,43 +931,67 @@ void LoadDataFile()
         }
 
         file.close();
-        SendMessage(hProgressBar, PBM_SETPOS, 100, 0);  // Завершаем прогресс-бар
+        SendMessage(hProgressBar, PBM_SETPOS, 100, 0);
 
         if (!points.empty()) {
-            ShowDataLoadedInfo();  // Показываем информацию о загруженных данных
+            // Проверяем, что все точки имеют одинаковое количество измерений
+            size_t expectedDimensions = points[0].coords.size();
+            bool dimensionsConsistent = true;
+
+            for (const auto& point : points) {
+                if (point.coords.size() != expectedDimensions) {
+                    dimensionsConsistent = false;
+                    break;
+                }
+            }
+
+            if (dimensionsConsistent) {
+                std::wstringstream successMsg;
+                successMsg << L"Данные успешно загружены!\r\n\r\n";
+                successMsg << L"Количество точек: " << points.size() << L"\r\n";
+                successMsg << L"Размерность: " << expectedDimensions << L"\r\n";
+                successMsg << L"Разделитель: " << (delimiter == L';' ? L"точка с запятой (;)" :
+                    delimiter == L',' ? L"запятая (,)" : L"табуляция") << L"\r\n";
+                successMsg << L"Готов к кластеризации!";
+                UpdateStatus(successMsg.str());
+
+                ShowDataLoadedInfo();
+            }
+            else {
+                UpdateStatus(L"Предупреждение: Обнаружены строки с разным количеством столбцов.\r\nНекоторые данные могут быть обработаны некорректно.");
+                ShowDataLoadedInfo();
+            }
         }
         else {
-            UpdateStatus(L"Ошибка: В файле не найдены корректные числовые данные.\r\n\r\nПроверьте формат файла.");
-            SendMessage(hProgressBar, PBM_SETPOS, 0, 0);  // Сбрасываем прогресс-бар
+            std::wstringstream errorMsg;
+            errorMsg << L"Ошибка: В файле не найдены корректные числовые данные.\r\n\r\n";
+            errorMsg << L"Проверьте формат файла:\r\n";
+            errorMsg << L"- Используемый разделитель: " << (delimiter == L';' ? L";" : delimiter == L',' ? L"," : L"табуляция") << L"\r\n";
+            errorMsg << L"- Убедитесь, что файл содержит только числовые данные\r\n";
+            errorMsg << L"- Проверьте кодировку файла";
+            UpdateStatus(errorMsg.str());
+            SendMessage(hProgressBar, PBM_SETPOS, 0, 0);
         }
     }
 }
 
-// Главная функция запуска процесса кластеризации
 void RunClusteringAnalysis()
 {
-    // Проверка наличия загруженных данных
     if (points.empty()) {
         UpdateStatus(L"Ошибка: Сначала загрузите данные!");
         return;
     }
 
-    // Получение параметров из полей ввода
     wchar_t buffer[32];
-    
-    // Количество кластеров
     GetWindowTextW(hKInput, buffer, 32);
     k = _wtoi(buffer);
 
-    // Порог сходимости
     GetWindowTextW(hThresholdInput, buffer, 32);
     convergenceThreshold = _wtof(buffer);
 
-    // Максимальное количество итераций
     GetWindowTextW(hMaxIterInput, buffer, 32);
     maxIterations = _wtoi(buffer);
 
-    // Валидация параметров
     if (k < 1 || k > static_cast<int>(points.size())) {
         std::wstringstream errorMsg;
         errorMsg << L"Ошибка: Количество кластеров должно быть от 1 до " << points.size() << L" (количество точек данных).";
@@ -1110,35 +1004,26 @@ void RunClusteringAnalysis()
         return;
     }
 
-    // Инициализация процесса кластеризации
     startTime = std::chrono::steady_clock::now();
     SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, maxIterations));
     UpdateStatus(L"Инициализация центроидов...");
 
-    // Инициализация центроидов методом K-means++
     InitializeCentroidsKMeansPlusPlus();
     currentIteration = 0;
     isConverged = false;
 
-    // Сохранение предыдущих позиций центроидов для проверки сходимости
     std::vector<std::vector<double>> prevCentroids;
 
-    // Основной цикл алгоритма K-means
     while (currentIteration < maxIterations && !isConverged)
     {
-        // Сохраняем текущие позиции центроидов
         prevCentroids.clear();
         for (const auto& cluster : clusters) {
             prevCentroids.push_back(cluster.centroid);
         }
 
-        // Шаг 1: Назначение точек к ближайшим кластерам
         AssignPointsToClusters();
-        
-        // Шаг 2: Обновление позиций центроидов
         UpdateClusterCentroids();
 
-        // Проверка сходимости: сравниваем смещение центроидов с порогом
         isConverged = true;
         for (int i = 0; i < k; i++) {
             if (CalculateEuclideanDistance(clusters[i].centroid, prevCentroids[i]) > convergenceThreshold) {
@@ -1148,9 +1033,8 @@ void RunClusteringAnalysis()
         }
 
         currentIteration++;
-        SendMessage(hProgressBar, PBM_SETPOS, currentIteration, 0);  // Обновляем прогресс
+        SendMessage(hProgressBar, PBM_SETPOS, currentIteration, 0);
 
-        // Периодическое обновление статуса для пользователя
         if (currentIteration % 5 == 0) {
             std::wstringstream status;
             status << L"Выполнение кластеризации... Итерация " << currentIteration << L"/" << maxIterations;
@@ -1158,42 +1042,32 @@ void RunClusteringAnalysis()
         }
     }
 
-    // Расчет детальной статистики после завершения алгоритма
     CalculateDetailedStatistics();
-    
-    // Отображение результатов
     ShowClusteringResults();
 }
 
-// Инициализация центроидов методом K-means++ для лучшего качества кластеризации
 void InitializeCentroidsKMeansPlusPlus()
 {
     clusters.clear();
     clusters.resize(k);
 
-    // Шаг 1: Выбираем первый центроид случайно
     std::uniform_int_distribution<size_t> dist(0, points.size() - 1);
     clusters[0].centroid = points[dist(rng)].coords;
 
-    // Шаг 2: Выбираем остальные центроиды с вероятностью, пропорциональной квадрату расстояния
     for (int i = 1; i < k; i++) {
         std::vector<double> distances(points.size());
         double totalDist = 0.0;
 
-        // Для каждой точки находим расстояние до ближайшего уже выбранного центроида
         for (size_t j = 0; j < points.size(); j++) {
             double minDist = std::numeric_limits<double>::max();
-            
             for (int c = 0; c < i; c++) {
                 double d = CalculateEuclideanDistance(points[j].coords, clusters[c].centroid);
                 minDist = std::min(minDist, d);
             }
-            
-            distances[j] = minDist * minDist;  // Квадрат расстояния для весов
+            distances[j] = minDist * minDist;
             totalDist += distances[j];
         }
 
-        // Выбираем следующий центроид с вероятностью, пропорциональной весу
         std::uniform_real_distribution<double> realDist(0.0, totalDist);
         double target = realDist(rng);
         double cumulative = 0.0;
@@ -1208,37 +1082,28 @@ void InitializeCentroidsKMeansPlusPlus()
     }
 }
 
-// Вычисление евклидова расстояния между двумя точками в многомерном пространстве
 double CalculateEuclideanDistance(const std::vector<double>& a, const std::vector<double>& b)
 {
-    // Проверка совместимости размерностей
     if (a.size() != b.size()) return std::numeric_limits<double>::max();
 
     double sum = 0.0;
-    
-    // Вычисляем сумму квадратов разностей по каждой координате
     for (size_t i = 0; i < a.size(); i++) {
         double diff = a[i] - b[i];
         sum += diff * diff;
     }
-    
-    return std::sqrt(sum);  // Возвращаем корень из суммы квадратов
+    return std::sqrt(sum);
 }
 
-// Назначение каждой точки к ближайшему кластеру
 void AssignPointsToClusters()
 {
-    // Сброс счетчиков точек в кластерах
     for (auto& cluster : clusters) {
         cluster.pointCount = 0;
     }
 
-    // Для каждой точки находим ближайший центроид
     for (auto& point : points) {
         double minDist = std::numeric_limits<double>::max();
         int bestCluster = 0;
 
-        // Проверяем расстояние до каждого центроида
         for (int i = 0; i < k; i++) {
             double dist = CalculateEuclideanDistance(point.coords, clusters[i].centroid);
             if (dist < minDist) {
@@ -1247,23 +1112,18 @@ void AssignPointsToClusters()
             }
         }
 
-        // Назначаем точку к ближайшему кластеру
         point.clusterLabel = bestCluster;
         clusters[bestCluster].pointCount++;
     }
 }
 
-// Обновление позиций центроидов как среднего арифметического точек кластера
 void UpdateClusterCentroids()
 {
     for (int i = 0; i < k; i++) {
-        // Пропускаем пустые кластеры
         if (clusters[i].pointCount == 0) continue;
 
-        // Инициализируем новый центроид нулями
         std::vector<double> newCentroid(clusters[i].centroid.size(), 0.0);
 
-        // Суммируем координаты всех точек кластера
         for (const auto& point : points) {
             if (point.clusterLabel == i) {
                 for (size_t j = 0; j < point.coords.size(); j++) {
@@ -1272,23 +1132,19 @@ void UpdateClusterCentroids()
             }
         }
 
-        // Вычисляем среднее арифметическое (делим на количество точек)
         for (size_t j = 0; j < newCentroid.size(); j++) {
             newCentroid[j] /= clusters[i].pointCount;
         }
 
-        // Обновляем позицию центроида
         clusters[i].centroid = newCentroid;
     }
 }
 
-// Расчет детальной статистики для каждого кластера
 void CalculateDetailedStatistics()
 {
-    totalSSE = 0.0;  // Сброс общей суммы квадратов ошибок
+    totalSSE = 0.0;
 
     for (int i = 0; i < k; i++) {
-        // Обработка пустых кластеров
         if (clusters[i].pointCount == 0) {
             clusters[i].avgDistance = 0.0;
             clusters[i].minDistance = 0.0;
@@ -1298,58 +1154,46 @@ void CalculateDetailedStatistics()
             continue;
         }
 
-        // Инициализация переменных для статистики
         double totalDist = 0.0;
         clusters[i].minDistance = std::numeric_limits<double>::max();
         clusters[i].maxDistance = 0.0;
         std::vector<double> distances;
 
-        // Вычисление расстояний от каждой точки кластера до центроида
         for (const auto& point : points) {
             if (point.clusterLabel == i) {
                 double dist = CalculateEuclideanDistance(point.coords, clusters[i].centroid);
                 totalDist += dist;
                 distances.push_back(dist);
-                
-                // Обновление минимального и максимального расстояний
                 clusters[i].minDistance = std::min(clusters[i].minDistance, dist);
                 clusters[i].maxDistance = std::max(clusters[i].maxDistance, dist);
-                
-                // Добавление к общей сумме квадратов ошибок
                 totalSSE += dist * dist;
             }
         }
 
-        // Вычисление среднего расстояния
         clusters[i].avgDistance = totalDist / clusters[i].pointCount;
 
-        // Вычисление дисперсии расстояний
         double variance = 0.0;
         for (double dist : distances) {
             variance += (dist - clusters[i].avgDistance) * (dist - clusters[i].avgDistance);
         }
         clusters[i].variance = variance / distances.size();
 
-        // Вычисление коэффициента компактности (0 = плохо, 1 = отлично)
         if (clusters[i].maxDistance > 0) {
             clusters[i].compactness = 1.0 - (clusters[i].avgDistance / clusters[i].maxDistance);
         }
         else {
-            clusters[i].compactness = 1.0;  // Все точки в одном месте
+            clusters[i].compactness = 1.0;
         }
     }
 }
 
-// Экспорт детального отчета о результатах кластеризации в текстовый файл
 bool ExportDetailedResults()
 {
-    // Проверка наличия результатов для экспорта
     if (points.empty() || clusters.empty()) {
         UpdateStatus(L"Ошибка: Нет результатов для экспорта. Сначала выполните кластеризацию.");
         return false;
     }
 
-    // Настройка диалога сохранения файла
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = GetActiveWindow();
@@ -1358,37 +1202,30 @@ bool ExportDetailedResults()
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"txt";
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
-    wcscpy_s(szSaveFile, L"kmeans_results.txt");  // Имя файла по умолчанию
+    wcscpy_s(szSaveFile, L"kmeans_results.txt");
 
     if (GetSaveFileName(&ofn))
     {
-        // Создание и запись файла отчета
         std::ofstream file(szSaveFile);
         if (!file.is_open()) {
             UpdateStatus(L"Ошибка: Не удалось создать файл для экспорта.");
             return false;
         }
 
-        // Заголовок отчета
         file << "=== ENHANCED K-MEANS CLUSTERING RESULTS - PERFECT EDITION ===\n\n";
 
-        // Секция параметров
         file << "Parameters:\n";
         file << "  Number of clusters (k): " << k << "\n";
         file << "  Convergence threshold: " << std::fixed << std::setprecision(2) << convergenceThreshold << "\n";
         file << "  Max iterations: " << maxIterations << "\n";
         file << "  Actual iterations: " << currentIteration << "\n\n";
 
-        // Секция метрик качества
         file << "Quality metrics:\n";
         file << "  SSE (Sum of Squared Errors): " << std::fixed << std::setprecision(6) << totalSSE << "\n\n";
 
-        // Секция назначений точек к кластерам
         file << "Cluster assignments:\n";
         for (size_t i = 0; i < points.size(); i++) {
             file << "Point " << (i + 1) << ": Cluster " << (points[i].clusterLabel + 1) << " (";
-            
-            // Вывод координат точки
             for (size_t j = 0; j < points[i].coords.size(); j++) {
                 file << std::fixed << std::setprecision(3) << points[i].coords[j];
                 if (j < points[i].coords.size() - 1) file << ", ";
@@ -1396,14 +1233,11 @@ bool ExportDetailedResults()
             file << ")\n";
         }
 
-        // Секция центроидов и статистики кластеров
         file << "\nCluster centroids and statistics:\n";
         for (int i = 0; i < k; i++) {
             file << "Cluster " << (i + 1) << ":\n";
             file << "  Points: " << clusters[i].pointCount << "\n";
             file << "  Centroid: (";
-            
-            // Вывод координат центроида
             for (size_t j = 0; j < clusters[i].centroid.size(); j++) {
                 file << std::fixed << std::setprecision(6) << clusters[i].centroid[j];
                 if (j < clusters[i].centroid.size() - 1) file << ", ";
@@ -1414,7 +1248,6 @@ bool ExportDetailedResults()
 
         file.close();
 
-        // Уведомление об успешном экспорте
         UpdateStatus(L"Отчет успешно экспортирован!\r\n\r\nФайл: " + std::wstring(szSaveFile));
         return true;
     }
@@ -1422,18 +1255,13 @@ bool ExportDetailedResults()
     return false;
 }
 
-// Очистка всех данных и сброс состояния приложения
 void ClearAllData()
 {
-    points.clear();           // Очищаем все точки данных
-    clusters.clear();         // Очищаем информацию о кластерах
-    currentIteration = 0;     // Сбрасываем счетчик итераций
-    isConverged = false;      // Сбрасываем флаг сходимости
-    totalSSE = 0.0;          // Сбрасываем общую ошибку
-    
-    // Сбрасываем прогресс-бар
+    points.clear();
+    clusters.clear();
+    currentIteration = 0;
+    isConverged = false;
+    totalSSE = 0.0;
     SendMessage(hProgressBar, PBM_SETPOS, 0, 0);
-    
-    // Возвращаемся к приветственному экрану
     ShowWelcomeScreen();
 }
